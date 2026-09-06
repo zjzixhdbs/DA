@@ -535,6 +535,62 @@ async def gl_balances_by_code(db, codes: list) -> dict:
     return {r["_id"]: round(float(r.get("debit") or 0) - float(r.get("credit") or 0)) for r in rows}
 
 
+async def cash_accounts_with_gl(db, q: dict) -> list:
+    """SATU sumber saldo kas: Buku Besar. `balance` = saldo GL akun rekening; `balance_mutasi`
+    = saldo awal + Σ mutasi bank (rahaza_cash_movements) sebagai pembanding rekonsiliasi.
+    Field `balance` di dokumen tidak lagi di-$inc oleh modul manapun (Iter 122)."""
+    rows = await db.rahaza_cash_accounts.find(q, {"_id": 0}).sort("code", 1).to_list(500)
+    if not rows:
+        return rows
+    gl = await gl_balances_by_code(db, [r.get("gl_account_code") for r in rows])
+    mv = {m["_id"]: m for m in await db.rahaza_cash_movements.aggregate([
+        {"$match": {"account_id": {"$in": [r["id"] for r in rows]}}},
+        {"$group": {"_id": "$account_id",
+                    "inflow": {"$sum": {"$cond": [{"$eq": ["$direction", "in"]}, "$amount", 0]}},
+                    "outflow": {"$sum": {"$cond": [{"$eq": ["$direction", "out"]}, "$amount", 0]}}}},
+    ]).to_list(len(rows) + 5)}
+    for r in rows:
+        m = mv.get(r["id"]) or {}
+        r["balance_mutasi"] = round(float(r.get("opening_balance") or 0) + float(m.get("inflow") or 0) - float(m.get("outflow") or 0))
+        code = r.get("gl_account_code")
+        if code:
+            r["gl_balance"] = gl.get(code, 0)
+            r["balance"] = r["gl_balance"]
+            r["balance_source"] = "gl"
+            r["balance_diff"] = r["balance"] - r["balance_mutasi"]
+        else:
+            r["gl_balance"] = None
+            r["balance"] = r["balance_mutasi"]
+            r["balance_source"] = "movements"
+            r["balance_diff"] = 0
+    return rows
+
+
+# ───────────────────────── RETUR RUSAK → KERUGIAN (Iter 122) ──────────────────
+async def post_return_damaged_loss(db, wh_ret: dict, qty: int, unit_cost: float, user: dict) -> dict:
+    """Retur kondisi rusak masuk karantina: nilai HPP direklas Dr Kerugian Retur Rusak / Cr HPP.
+    Persediaan karantina bernilai 0 (tidak dijual). Idempoten per retur gudang."""
+    total = round(float(unit_cost or 0) * int(qty or 0), 2)
+    if total <= 0:
+        return {"ok": False, "error": "HPP retur 0 — tidak ada nilai kerugian yang bisa dijurnal.", "zero_cost": True}
+    source_ref = f"whret_damaged:{wh_ret.get('id')}"
+    existing = await _find_existing_je(db, "return_damaged_loss", source_ref)
+    if existing:
+        return {"ok": True, "je_id": existing["id"], "je_number": existing["je_number"], "already_posted": True}
+    mapping = await get_mapping(db, "return_damaged_loss")
+    loss_code, cogs_code = mapping.get("debit_return_loss"), mapping.get("credit_cogs")
+    if not loss_code or not cogs_code:
+        return {"ok": False, "error": "Mapping 'return_damaged_loss' belum lengkap."}
+    code = wh_ret.get("return_code") or wh_ret.get("id")
+    desc = f"Retur {code} rusak → karantina ({qty} × {round(unit_cost)})"
+    lines = [
+        {"account_code": loss_code, "debit": total, "credit": 0, "description": desc},
+        {"account_code": cogs_code, "debit": 0, "credit": total, "description": f"Retur {code} reklas HPP → kerugian"},
+    ]
+    return await _create_posted_je(db, date.today(), f"Kerugian retur rusak {code}",
+                                   "return_damaged_loss", source_ref, lines, user)
+
+
 # ───────────────────────── RETUR MARKETPLACE → FG BERNILAI (Iter 121, B-08) ────
 async def post_marketplace_return_restock(db, wh_ret: dict, qty: int, unit_cost: float, user: dict) -> dict:
     """Barang retur kondisi baik masuk stok jual → Dr FG / Cr HPP sebesar HPP saat keluar.

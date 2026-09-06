@@ -1523,3 +1523,10 @@ Keputusan pemilik: (1) skema akun **4-digit kanonik**, legacy 3-digit neraca yan
 - **Riwayat Pembayaran Invoice**: `GET /ar-invoices/{id}/payments` & `/ap-invoices/{id}/payments` diperkaya nama rekening; UI modal `PaymentHistoryModal` (AR tombol Riwayat; detail Faktur Supplier section riwayat) dengan nomor JE.
 - Bukti: testing_agent iteration_121 (backend 8/8 + UI lulus).
 - Backlog berikutnya: hapus `$inc balance` sisa (field mutasi hanya pembanding), retur marketplace kondisi Rusak → nilai karantina/kerugian, void CN marketplace lama yang pernah dijurnal dobel (DB produksi), kartu saldo GL untuk Kas Kecil.
+
+## Session log — Iter 122 (2026-09-06): satu sumber saldo kas · retur rusak bernilai · skrip CN dobel · kwitansi PDF — VERIFIED (iteration_122: backend 10/10 + UI)
+- **Hapus Saldo Ganda**: semua `$inc balance` di rahaza_cash_accounts dihapus (AR/AP payment, expense, sales_direct, maklon, bank recon ×2). `rahaza_posting.cash_accounts_with_gl()` = satu sumber: `balance` dari GL, `balance_mutasi` = opening + Σ cash_movements (pembanding). Dokumen rekening baru tanpa field `balance`. Cash-flow & rekonsiliasi bank memakai saldo GL.
+- **Retur Rusak Bernilai**: COA baru 6-1300 Kerugian Retur Barang Rusak; lokasi default ZNA-KARANTINA; profil `return_damaged_loss` (Dr 6-1300 / Cr 5-1000). `returns_bridge._value_damaged()` → JE reklas idempoten per retur (`whret_damaged:{id}`), field loss_* di wh_returns; karantina bernilai 0.
+- **Bersihkan CN Lama**: `scripts/void_cn_marketplace_dobel.py [--apply]` (dry-run default, void JE + hapus cermin lines, CN → gl_mode settlement, nonaktifkan pelanggan MARKETPLACE bila tak dipakai, idempoten, hormati period lock).
+- **Cetak Bukti Bayar**: `routes/rahaza_payment_receipt.py` GET `/api/rahaza/{ar|ap}-invoices/{iid}/payments/{pid}/receipt.pdf` (reportlab, template sales-note, terbilang); tombol PDF per baris di modal riwayat AR & section AP.
+- Backlog berikutnya: kwitansi via email/WA ke pelanggan; laporan kerugian retur per channel; hapus field `balance` legacy di DB produksi (skrip migrasi); template kwitansi sendiri di Pengaturan Dokumen.

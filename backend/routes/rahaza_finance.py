@@ -34,7 +34,7 @@ from routes.rahaza_posting import (
     void_ar_invoice_posting,
     void_ap_invoice_posting,
     post_cash_opening_balance,
-    gl_balances_by_code,
+    cash_accounts_with_gl,
 )
 
 log = logging.getLogger(__name__)
@@ -421,7 +421,6 @@ async def record_ar_payment(iid: str, request: Request):
                 "date": payment_date, "notes": body.get("notes") or "",
                 "timestamp": _now(), "created_by": user["id"], "created_by_name": user.get("name", ""),
             })
-            await db.rahaza_cash_accounts.update_one({"id": account_id}, {"$inc": {"balance": round(amount)}})
     payment_id = await _record_payment_doc(db, "rahaza_ar_payments", inv, amount, account_id, movement_id,
                                            payment_date, body.get("notes"), user)
 
@@ -766,7 +765,6 @@ async def record_ap_payment(iid: str, request: Request):
                 "date": payment_date, "notes": body.get("notes") or "",
                 "timestamp": _now(), "created_by": user["id"], "created_by_name": user.get("name", ""),
             })
-            await db.rahaza_cash_accounts.update_one({"id": account_id}, {"$inc": {"balance": -round(amount)}})
     payment_id = await _record_payment_doc(db, "rahaza_ap_payments", inv, amount, account_id, movement_id,
                                            payment_date, body.get("notes"), user)
 
@@ -908,28 +906,16 @@ async def ap_aging(request: Request):
 
 
 # ── CASH ACCOUNTS & MOVEMENTS ────────────────────────────────────────────────
+# Iter 121/122: saldo kartu kas = Buku Besar (lihat rahaza_posting.cash_accounts_with_gl).
+_cash_accounts_with_gl = cash_accounts_with_gl
+
+
 async def _decorate_cash_balances(db, rows: list) -> list:
-    """Iter 121 (B-06): saldo kartu kas dibaca dari BUKU BESAR (akun GL rekening), bukan
-    field `balance` hasil $inc. `balance_mutasi` menyimpan angka lama untuk pembanding."""
-    gl = await gl_balances_by_code(db, [r.get("gl_account_code") for r in rows])
+    ids = [r["id"] for r in rows]
+    fresh = {r["id"]: r for r in await cash_accounts_with_gl(db, {"id": {"$in": ids}})}
     for r in rows:
-        field_bal = round(float(r.get("balance") or 0))
-        code = r.get("gl_account_code")
-        r["balance_mutasi"] = field_bal
-        if code:
-            r["gl_balance"] = gl.get(code, 0)
-            r["balance"] = r["gl_balance"]
-            r["balance_source"] = "gl"
-        else:
-            r["gl_balance"] = None
-            r["balance_source"] = "field"
-        r["balance_diff"] = (r["balance"] - field_bal) if code else 0
+        r.update(fresh.get(r["id"], {}))
     return rows
-
-
-async def _cash_accounts_with_gl(db, q: dict) -> list:
-    rows = await db.rahaza_cash_accounts.find(q, {"_id": 0}).sort("code", 1).to_list(500)
-    return await _decorate_cash_balances(db, rows)
 
 
 @router.get("/cash-accounts")
@@ -976,7 +962,6 @@ async def create_cash_account(request: Request):
         "type": body.get("type") or "cash",  # cash | bank
         "bank_name": body.get("bank_name") or "",
         "account_number": body.get("account_number") or "",
-        "balance": float(body.get("opening_balance") or 0),
         "opening_balance": float(body.get("opening_balance") or 0),
         "notes": body.get("notes") or "",
         "active": True,
@@ -1102,7 +1087,6 @@ async def create_expense(request: Request):
                 "date": doc["date"], "notes": doc["notes"],
                 "timestamp": _now(), "created_by": user["id"], "created_by_name": user.get("name", ""),
             })
-            await db.rahaza_cash_accounts.update_one({"id": doc["account_id"]}, {"$inc": {"balance": -doc["amount"]}})
     # ── F2 Auto-post
     posting_result = None
     try:

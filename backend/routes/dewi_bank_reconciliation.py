@@ -170,11 +170,13 @@ async def _internal_check(db, s: dict, gl_lines: list) -> dict:
         if status != "ok":
             issues.append(row)
     gl_without_movement = [g for g in gl_lines if g["je_id"] not in je_ids_with_mv]
-    acc = await db.rahaza_cash_accounts.find_one({"id": s.get("cash_account_id")}, {"_id": 0, "balance": 1})
+    from routes.rahaza_posting import cash_accounts_with_gl
+    acc = (await cash_accounts_with_gl(db, {"id": s.get("cash_account_id")}) or [{}])[0]
     return {
         "movements": rows, "issues": issues,
         "gl_without_movement": gl_without_movement,
-        "card_balance": round(float((acc or {}).get("balance") or 0), 2),
+        "card_balance": round(float(acc.get("balance") or 0), 2),
+        "movement_balance": round(float(acc.get("balance_mutasi") or 0), 2),
         "gl_balance_now": await _gl_balance_until(db, s.get("gl_account_code"), "9999-12-31") if s.get("gl_account_code") else 0,
     }
 
@@ -567,7 +569,6 @@ async def adjust_from_txn(session_id: str, txn_id: str, request: Request):
         "status": "posted", "posted_at": datetime.now(timezone.utc), "posted_by": user.get("id"),
         "je_id": res.get("je_id"), "je_number": res.get("je_number")}})
     delta = adj["amount"] if t_dir == "in" else -adj["amount"]
-    await db.rahaza_cash_accounts.update_one({"id": s["cash_account_id"]}, {"$inc": {"balance": delta}})
     await db.rahaza_cash_movements.insert_one({
         "id": _uid(), "account_id": s["cash_account_id"], "account_name": s.get("account_name"), "direction": t_dir,
         "amount": adj["amount"], "category": "bank_adjustment", "ref_id": adj["id"], "ref_label": adj["description"],

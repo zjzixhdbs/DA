@@ -132,6 +132,7 @@ SEED_TEMPLATE = [
     ("6-1000", "Beban Penjualan & Pemasaran", "EXPENSE", True, {}),
     ("6-1100", "Biaya Iklan & Promosi", "EXPENSE", False, {}),
     ("6-1200", "Biaya Pengiriman", "EXPENSE", False, {}),
+    ("6-1300", "Kerugian Retur Barang Rusak", "EXPENSE", False, {"is_return_loss": True}),
     ("6-2000", "Beban Administrasi & Umum", "EXPENSE", True, {}),
     ("6-2100", "Gaji Staff Kantor", "EXPENSE", False, {"is_salary_expense": True}),
     ("6-2200", "Listrik & Air Kantor", "EXPENSE", False, {}),

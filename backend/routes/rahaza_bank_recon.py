@@ -258,8 +258,6 @@ async def post_bank_adjustment(adjustment_id: str, request: Request):
             direction = None  # custom Dr/Cr keduanya non-bank → saldo bank tidak berubah
         if direction:
             acc_doc = await db.rahaza_cash_accounts.find_one({"id": bank_account_id}, {"_id": 0, "name": 1})
-            await db.rahaza_cash_accounts.update_one(
-                {"id": bank_account_id}, {"$inc": {"balance": amount if direction == "in" else -amount}})
             await db.rahaza_cash_movements.insert_one({
                 "id": _uid(), "account_id": bank_account_id, "account_name": (acc_doc or {}).get("name"),
                 "direction": direction, "amount": round(amount, 2), "category": "bank_adjustment",

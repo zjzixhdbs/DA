@@ -101,7 +101,7 @@ export default function RahazaCashAccountsModule({ token }) {
             <div className="mt-3 text-2xl font-bold text-foreground" data-testid={`ca-balance-${a.code}`}>{fmt(a.balance)}</div>
             <div className="mt-1 flex items-center justify-between text-[10px]">
               <span className={a.balance_source === 'gl' ? 'text-emerald-400' : 'text-amber-400'} data-testid={`ca-source-${a.code}`}>
-                {a.balance_source === 'gl' ? 'Saldo Buku Besar' : 'Belum tertaut GL · saldo mutasi'}
+                {a.balance_source === 'gl' ? 'Saldo Buku Besar' : 'Belum tertaut GL · saldo dari mutasi'}
               </span>
               {a.balance_source === 'gl' && (
                 <span className={a.balance_diff === 0 ? 'text-muted-foreground' : 'text-amber-400'} data-testid={`ca-diff-${a.code}`}>

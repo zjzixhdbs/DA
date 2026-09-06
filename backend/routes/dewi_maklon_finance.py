@@ -178,8 +178,6 @@ async def post_maklon_payment(db, invoice: dict, payment: dict, user: dict) -> d
                 'date': payment.get('payment_date'), 'notes': payment.get('notes') or '',
                 'timestamp': _now(), 'created_by': user.get('id'), 'created_by_name': user.get('name', ''),
             })
-            await db.rahaza_cash_accounts.update_one({'id': cash_account_id},
-                                                     {'$inc': {'balance': round(float(payment['amount']))}})
     result = await post_ar_payment(db, pseudo, float(payment['amount']), cash_account_id,
                                    payment.get('payment_date'), user, movement_id=payment['id'])
     upd = ({'gl_je_id': result.get('je_id'), 'gl_je_number': result.get('je_number'), 'post_error': None}
@@ -195,8 +193,6 @@ async def void_maklon_payment(db, payment: dict, user: dict, reason: str = '') -
     mv = await db.rahaza_cash_movements.find_one({'id': payment['id']}, {'_id': 0})
     if mv:
         await db.rahaza_cash_movements.delete_one({'id': payment['id']})
-        await db.rahaza_cash_accounts.update_one({'id': mv.get('account_id')},
-                                                 {'$inc': {'balance': -float(mv.get('amount') or 0)}})
     return res
 
 
@@ -519,7 +515,6 @@ async def pay_cmt_payment(payment_id: str, payload: CmtPayIn, user: dict = Depen
         'source_module': 'cmt_payment', 'date': pay_date, 'notes': payload.notes or '',
         'timestamp': _now(), 'created_by': user.get('id'), 'created_by_name': user.get('name', ''),
     })
-    await db.rahaza_cash_accounts.update_one({'id': acc['id']}, {'$inc': {'balance': -round(amount)}})
     from routes.rahaza_posting import post_ap_payment
     pseudo = {'id': payment_id, 'invoice_number': payment.get('payment_code'), 'vendor_name': payment.get('cmt_name'),
               'gl_ap_account_code': payment.get('gl_ap_account_code')}
@@ -553,7 +548,6 @@ async def void_cmt_disbursement(payment_id: str, did: str, user: dict = Depends(
     mv = await db.rahaza_cash_movements.find_one({'id': did}, {'_id': 0})
     if mv:
         await db.rahaza_cash_movements.delete_one({'id': did})
-        await db.rahaza_cash_accounts.update_one({'id': mv['account_id']}, {'$inc': {'balance': float(mv['amount'])}})
     await db.dewi_cmt_disbursements.update_one({'id': did}, {'$set': {'status': 'voided', 'voided_at': _now(), 'voided_by': user.get('id')}})
     payment = await db.dewi_cmt_payments.find_one({'id': payment_id}, {'_id': 0})
     total = _cmt_amount(payment)

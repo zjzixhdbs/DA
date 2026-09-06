@@ -1541,6 +1541,8 @@ app.include_router(rahaza_payroll_profiles_router)
 app.include_router(rahaza_payroll_runs_router)
 app.include_router(rahaza_payroll_payslips_router)
 app.include_router(rahaza_finance_router)
+from routes.rahaza_payment_receipt import router as rahaza_payment_receipt_router  # noqa: E402
+app.include_router(rahaza_payment_receipt_router)
 app.include_router(rahaza_hpp_router)
 app.include_router(rahaza_reports_router)
 app.include_router(notifications_unified_router)  # Must come before rahaza_notifications to win path race

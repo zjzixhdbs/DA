@@ -194,6 +194,14 @@ DEFAULT_PROFILES = [
         },
     },
     {
+        "event_type": "return_damaged_loss",
+        "description": "Retur kondisi rusak masuk karantina → Dr Kerugian Retur Rusak / Cr HPP (reklas, persediaan karantina nilai 0)",
+        "mapping": {
+            "debit_return_loss": "6-1300",
+            "credit_cogs": "5-1000",
+        },
+    },
+    {
         "event_type": "wip_to_fg_on_wo_complete",
         "description": "WO selesai: pindah nilai WIP ke Barang Jadi → Dr FG / Cr WIP",
         "mapping": {

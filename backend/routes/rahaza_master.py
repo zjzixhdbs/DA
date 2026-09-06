@@ -50,6 +50,7 @@ DEFAULT_LOCATIONS = [
     {"code": "ZNA-KAIN",      "name": "Area Kain (Lt.2)", "type": "zona", "parent_code": "GED-B"},
     {"code": "ZNA-AKSESORIS", "name": "Area Aksesoris",   "type": "zona", "parent_code": "GED-B"},
     {"code": "ZNA-FG",        "name": "Area Produk Jadi", "type": "zona", "parent_code": "GED-B"},
+    {"code": "ZNA-KARANTINA", "name": "Area Karantina QC (retur rusak, tidak dijual)", "type": "zona", "parent_code": "GED-B"},
     {"code": "ZNA-SAMPLE",    "name": "Area Sample/RnD",  "type": "zona", "parent_code": "GED-A"},
 ]
 

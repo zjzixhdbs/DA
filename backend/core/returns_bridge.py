@@ -459,6 +459,35 @@ async def _stamp_marketing(db, marketing_return_id: str, wh: dict) -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 # RESTOCK (satu pintu `core/stock_service`)
 # ═════════════════════════════════════════════════════════════════════════════
+async def _unit_cost_for(db, mid: str) -> float:
+    from core import fg_cost_layers as fcl
+    snap = await fcl.hpp_snapshot(db, mid)
+    unit_cost = float(snap.get("hpp_fifo_avg") or snap.get("hpp_last_batch") or 0)
+    if unit_cost <= 0:
+        mat = await db.rahaza_materials.find_one({"id": mid}, {"_id": 0, "hpp": 1, "unit_cost": 1}) or {}
+        unit_cost = float(mat.get("hpp") or mat.get("unit_cost") or 0)
+    return round(unit_cost, 2)
+
+
+async def _value_damaged(db, wh_ret: dict, mid: str, qty: int, actor: dict) -> dict:
+    """Retur rusak → karantina (nilai 0): reklas HPP menjadi Kerugian Retur Rusak (Iter 122)."""
+    from routes.rahaza_posting import post_return_damaged_loss
+    out = {"loss_unit_cost": 0.0, "loss_amount": 0.0, "loss_je_id": None,
+           "loss_je_number": None, "loss_post_error": None}
+    try:
+        unit_cost = await _unit_cost_for(db, mid)
+        out["loss_unit_cost"] = unit_cost
+        out["loss_amount"] = round(unit_cost * qty, 2)
+        je = await post_return_damaged_loss(db, wh_ret, qty, unit_cost, actor or {})
+        out["loss_je_id"] = je.get("je_id")
+        out["loss_je_number"] = je.get("je_number")
+        out["loss_post_error"] = None if je.get("ok") else je.get("error")
+    except Exception as e:  # noqa: BLE001
+        logger.error("[retur-jembatan] kerugian retur rusak %s gagal: %s", wh_ret.get("return_code"), e)
+        out["loss_post_error"] = str(e)
+    return out
+
+
 async def _value_restock(db, wh_ret: dict, mid: str, qty: int, actor: dict) -> dict:
     """Lapisan HPP + jurnal balik HPP untuk retur yang kembali ke stok jual."""
     from core import fg_cost_layers as fcl
@@ -466,12 +495,8 @@ async def _value_restock(db, wh_ret: dict, mid: str, qty: int, actor: dict) -> d
     out = {"hpp_unit_cost": 0.0, "hpp_layer_id": None, "cogs_je_id": None,
            "cogs_je_number": None, "cogs_post_error": None}
     try:
-        snap = await fcl.hpp_snapshot(db, mid)
-        unit_cost = float(snap.get("hpp_fifo_avg") or snap.get("hpp_last_batch") or 0)
-        if unit_cost <= 0:
-            mat = await db.rahaza_materials.find_one({"id": mid}, {"_id": 0, "hpp": 1, "unit_cost": 1}) or {}
-            unit_cost = float(mat.get("hpp") or mat.get("unit_cost") or 0)
-        out["hpp_unit_cost"] = round(unit_cost, 2)
+        unit_cost = await _unit_cost_for(db, mid)
+        out["hpp_unit_cost"] = unit_cost
         ref = {"type": "wh_return_restock", "id": wh_ret["id"],
                "return_code": wh_ret.get("return_code", ""),
                "marketing_return_id": wh_ret.get("source_marketing_return_id")}
@@ -564,6 +589,8 @@ async def restock(db, wh_ret: dict, *, condition=None, qty=None, actor=None,
     hpp = {}
     if loc["sellable"]:
         hpp = await _value_restock(db, wh_ret, mid, n, actor)
+    else:
+        hpp = await _value_damaged(db, wh_ret, mid, n, actor)
 
     patch = {
         "restock_qty": n,

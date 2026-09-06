@@ -250,7 +250,6 @@ async def _apply_ar_payment(db, inv_id: str, amount: float, cash_account_id: str
         "id": movement_id, "account_id": cash_account_id, "account_name": acc.get("name"), "direction": "in",
         "amount": round(amount), "category": "ar_payment", "ref_id": inv_id, "ref_label": updated.get("invoice_number"),
         "date": pay_date, "notes": notes, "timestamp": _now(), "created_by": user["id"], "created_by_name": user.get("name", "")})
-    await db.rahaza_cash_accounts.update_one({"id": cash_account_id}, {"$inc": {"balance": round(amount)}})
     if not updated.get("gl_je_id"):
         await post_ar_invoice(db, updated, user)
         updated = await db.rahaza_ar_invoices.find_one({"id": inv_id}, {"_id": 0})
@@ -717,7 +716,6 @@ async def create_return(sid: str, request: Request):
                 await db.rahaza_cash_movements.insert_one({"id": refund_mv, "account_id": refund_account, "account_name": acc.get("name"), "direction": "out",
                                                            "amount": excess, "category": "sales_refund", "ref_id": inv["id"], "ref_label": cn["cn_number"], "date": ret_date,
                                                            "notes": f"Refund retur {ret_doc['return_number']}", "timestamp": _now(), "created_by": user["id"], "created_by_name": user.get("name", "")})
-                await db.rahaza_cash_accounts.update_one({"id": refund_account}, {"$inc": {"balance": -excess}})
                 cash_code = acc.get("gl_account_code") or (await get_mapping(db, "ar_payment")).get("debit_cash")
                 if cash_code and ar_code:
                     refund_je = await _create_posted_je(db, date.fromisoformat(ret_date), f"Refund retur {ret_doc['return_number']} ke {note.get('customer_name')}", "sales_refund",

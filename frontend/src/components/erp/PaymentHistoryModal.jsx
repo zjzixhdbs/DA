@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react';
-import { History, BookOpen } from 'lucide-react';
+import { History, BookOpen, FileDown } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatRupiah } from '@/lib/format';
+import { toast } from 'sonner';
+
+async function downloadReceipt(token, kind, invoiceId, paymentId) {
+  try {
+    const r = await fetch(`/api/rahaza/${kind}-invoices/${invoiceId}/payments/${paymentId}/receipt.pdf`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = (r.headers.get('Content-Disposition') || '').match(/filename="(.+)"/)?.[1] || 'Kwitansi.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { toast.error(`Gagal mengunduh kwitansi: ${e.message}`); }
+}
 
 // Riwayat pembayaran per invoice (AR/AP) + nomor jurnal — staf tak perlu buka Buku Jurnal.
 export function PaymentHistoryList({ token, kind, invoiceId }) {
@@ -33,6 +47,7 @@ export function PaymentHistoryList({ token, kind, invoiceId }) {
             <th className="py-2 pr-2">No. Jurnal</th>
             <th className="py-2 pr-2">Catatan</th>
             <th className="py-2 text-right">Jumlah</th>
+            <th className="py-2 pl-2 text-right">Kwitansi</th>
           </tr>
         </thead>
         <tbody>
@@ -47,6 +62,16 @@ export function PaymentHistoryList({ token, kind, invoiceId }) {
               </td>
               <td className="py-2 pr-2 text-xs text-muted-foreground truncate max-w-[180px]" title={r.notes}>{r.notes || '—'}</td>
               <td className="py-2 text-right font-mono text-xs">{formatRupiah(r.amount)}</td>
+              <td className="py-2 pl-2 text-right">
+                <button
+                  onClick={() => downloadReceipt(token, kind, invoiceId, r.id)}
+                  className="inline-flex items-center gap-1 h-6 px-2 rounded border border-[var(--glass-border)] text-[10px] text-foreground/70 hover:bg-[var(--glass-bg-hover)] transition-colors"
+                  data-testid={`payment-receipt-${r.id}`}
+                  title="Unduh kwitansi PDF"
+                >
+                  <FileDown size={11} />PDF
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -54,6 +79,7 @@ export function PaymentHistoryList({ token, kind, invoiceId }) {
           <tr className="border-t-2 border-[var(--glass-border)] font-semibold">
             <td colSpan={4} className="py-2 text-right text-xs">Total dibayar ({rows.length} pembayaran)</td>
             <td className="py-2 text-right font-mono text-xs" data-testid="payment-history-total">{formatRupiah(total)}</td>
+            <td />
           </tr>
         </tfoot>
       </table>

@@ -565,9 +565,9 @@ async def cash_flow(
     financing = _format_bucket(activities["financing"])
     net_change = round(operating["total"] + investing["total"] + financing["total"], 2)
 
-    # 2) Opening & closing cash balances (all cash accounts)
-    cash_accs = await db.rahaza_cash_accounts.find({}, {"_id": 0}).to_list(500)
-    # current balance (right-now), and opening_balance (start balance)
+    # 2) Opening & closing cash balances (all cash accounts) — saldo dari Buku Besar (Iter 122)
+    from routes.rahaza_posting import cash_accounts_with_gl
+    cash_accs = await cash_accounts_with_gl(db, {})
     closing_cash_now = sum(float(a.get("balance") or 0) for a in cash_accs)
 
     # Opening = closing at start = current - all movements from `from_date` onwards
