@@ -437,6 +437,16 @@ async def mature_ap_from_cmt_receipt(db, receipt_id: str, user: dict) -> dict:
     }
     await db.dewi_cmt_payments.insert_one(doc)
 
+    # B-09: AP CMT masuk GL saat tagihan lahir dari penerimaan FG (akrual), bukan menunggu dibayar.
+    try:
+        from routes.dewi_maklon_finance import post_cmt_ap_invoice
+        ap_res = await post_cmt_ap_invoice(db, doc, user)
+        if ap_res.get('ok'):
+            await db.dewi_cmt_payments.update_one({'id': doc['id']}, {'$set': {'status': 'posted', 'updated_at': now()}})
+        else:
+            logger.warning("[maklon-bridge] AP CMT %s belum bisa diposting: %s", payment_code, ap_res.get('error'))
+    except Exception as e:  # noqa: BLE001
+        logger.error("[maklon-bridge] posting AP CMT %s gagal: %s", payment_code, e)
     try:
         await log_activity(
             user.get('id', ''), user.get('name', 'system'),

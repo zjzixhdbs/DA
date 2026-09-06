@@ -63,8 +63,9 @@ async def main():
     out['coa_issues'] = {
         'no_type': [c for c, a in coa.items() if not a.get('type')],
         'no_normal_balance': [c for c, a in coa.items() if not a.get('normal_balance')],
-        'type_normal_mismatch': [c for c, a in coa.items() if a.get('type') in ('ASSET', 'EXPENSE', 'COGS', 'OTHER_EXPENSE') and a.get('normal_balance') != 'DEBIT'
-                                 or a.get('type') in ('LIABILITY', 'EQUITY', 'REVENUE', 'OTHER_INCOME') and a.get('normal_balance') != 'CREDIT'],
+        'type_normal_mismatch': [c for c, a in coa.items() if not (a.get('flags') or {}).get('is_contra') and (
+                                 a.get('type') in ('ASSET', 'EXPENSE', 'COGS', 'OTHER_EXPENSE') and a.get('normal_balance') != 'DEBIT'
+                                 or a.get('type') in ('LIABILITY', 'EQUITY', 'REVENUE', 'OTHER_INCOME') and a.get('normal_balance') != 'CREDIT')],
         'parent_missing': [c for c, a in coa.items() if a.get('parent_code') and a['parent_code'] not in coa],
     }
 

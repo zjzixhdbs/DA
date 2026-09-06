@@ -291,17 +291,21 @@ async def post_cmt_ap_invoice(db, cmt_payment: dict, user: dict) -> dict:
     # Penalty reduction
     penalty = float(cmt_payment.get('total_penalty', 0))
     if penalty > 0:
-        if not mapping.get('debit_penalty_income'):
-            return {'ok': False, 'error': "Mapping 'cmt_ap_invoice.debit_penalty_income' belum diisi."}
+        # M-04: penalti keterlambatan MENGURANGI tagihan CMT (biaya & hutang), bukan pendapatan lain
+        lines[0]['credit'] = 0
+        lines[0]['debit'] = round(total - penalty, 2)
+        lines[0]['description'] += f' (setelah penalti Rp {penalty:,.0f})'
         lines[1]['credit'] = round(total - penalty, 2)
-        lines.append({
-            'account_code': mapping.get('debit_penalty_income'),
-            'debit': 0,
-            'credit': penalty,
-            'description': f'Penalti keterlambatan CMT — {cmt_payment.get("cmt_name","")}',
-        })
+        await db.dewi_cmt_payments.update_one({'id': payment_id}, {'$set': {
+            'net_amount': round(total - penalty, 2), 'total_amount': round(total - penalty, 2)}})
 
-    je_date = date.fromisoformat(cmt_payment.get('payment_date') or date.today().isoformat())
+    # B-09: tanggal JE = tanggal tagihan/penerimaan FG (akrual), bukan tanggal bayar
+    _d = (cmt_payment.get('invoice_date') or cmt_payment.get('period_to') or cmt_payment.get('payment_date')
+          or str(cmt_payment.get('created_at') or '')[:10] or date.today().isoformat())
+    try:
+        je_date = date.fromisoformat(str(_d)[:10])
+    except ValueError:
+        je_date = date.today()
     result = await _create_posted_je(
         db,
         je_date=je_date,

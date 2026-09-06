@@ -291,12 +291,17 @@ async def create_ap_invoice_from_gr(payload: CreateAPFromGRPayload, request: Req
                 'price': inv_price,
                 'price_input': round(inv_price * (float(li.get('uom_factor') or 1) or 1), 4),
                 'amount': amt,
+                'gr_unit_cost': unit_cost,
+                'gr_amount': round(inv_qty * unit_cost, 2),
             })
 
     if not inv_items:
         raise HTTPException(400, 'Tidak ada item yang bisa di-invoice (semua sudah di-invoice / quantity 0).')
 
     subtotal = sum(it['amount'] for it in inv_items)
+    # B-10: selisih harga tagihan vs GR tidak boleh mengendap di GRNI → dijurnal sebagai PPV
+    grni_amount = round(sum(it['gr_amount'] for it in inv_items), 2)
+    price_variance = round(subtotal - grni_amount, 2)
     tax_pct = float(payload.tax_pct or 0)
     tax_amount = round(subtotal * tax_pct / 100, 2)
     total = round(subtotal + tax_amount, 2)
@@ -357,6 +362,8 @@ async def create_ap_invoice_from_gr(payload: CreateAPFromGRPayload, request: Req
         'source': 'gr',
         # C-02: tagihan atas barang yang SUDAH diterima → Dr GRNI (bukan beban), Cr AP
         'gl_debit_code': (await get_mapping(db, 'ap_invoice')).get('debit_grni'),
+        'gl_grni_amount': grni_amount,
+        'gl_price_variance': price_variance,
         'gr_ids': sorted([gr['id'] for gr in grs]),
         'gr_numbers': sorted([gr.get('receipt_number', '') for gr in grs]),
         'po_ids': sorted(po_ids),

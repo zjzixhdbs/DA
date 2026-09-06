@@ -104,6 +104,11 @@ async def _ensure_period_open(db, d: date, context: Optional[dict] = None) -> Op
     return None
 
 
+async def _period_is_closed(db, d: date) -> bool:
+    per = await db.rahaza_periods.find_one({"period_code": d.strftime("%Y-%m")}, {"_id": 0, "status": 1})
+    return bool(per and per.get("status") in ("closed", "locked"))
+
+
 async def _get_account(db, code: str):
     if not code:
         return None
@@ -189,7 +194,7 @@ async def _create_posted_je(
     # Period guard (M-09: jurnal penutup tahun sengaja bertanggal 31 Des periode yang sudah closed)
     err = await _ensure_period_open(db, je_date, {"source_module": source_module, "source_ref": source_ref, "memo": memo,
                                                   "actor_name": (user or {}).get("name")})
-    if err and not (allow_closed_period and "sudah" in err):
+    if err and not (allow_closed_period and await _period_is_closed(db, je_date)):
         return {"ok": False, "error": err}
 
     je_number = await _gen_je_number(db, je_date)
@@ -665,10 +670,20 @@ async def post_credit_note(db, credit_note: dict, user: dict) -> dict:
     desc = f"CN {credit_note.get('cn_number')}"
     
     # Reverse entry: Dr Revenue / Cr AR (opposite of AR invoice)
+    # H-10: bila CN memuat PPN, PPN Keluaran ikut dibalik (Dr 2-1400) — 4-1200 hanya DPP
+    tax = float(credit_note.get("tax_amount") or 0)
+    tax_code = ar_mapping.get("credit_tax_output")
+    if tax > 0 and not tax_code:
+        result = {"ok": False, "error": "CN memuat PPN tetapi mapping 'ar_invoice.credit_tax_output' belum diisi."}
+        await _save_source_posting_result(db, "rahaza_credit_notes", cn_id, result, prefix="gl")
+        return result
+    dpp = round(total - tax, 2) if tax > 0 else total
     lines = [
-        {"account_code": rev_code, "debit": total, "credit": 0, "description": desc},
+        {"account_code": rev_code, "debit": dpp, "credit": 0, "description": desc},
         {"account_code": ar_code, "debit": 0, "credit": total, "description": desc},
     ]
+    if tax > 0:
+        lines.append({"account_code": tax_code, "debit": tax, "credit": 0, "description": f"{desc} - PPN Keluaran dibalik"})
 
     result = await _create_posted_je(db, je_date, memo, "credit_note", source_ref, lines, user)
     await _save_source_posting_result(db, "rahaza_credit_notes", cn_id, result, prefix="gl")
@@ -731,6 +746,17 @@ async def post_ap_invoice(db, invoice: dict, user: dict) -> dict:
         {"account_code": exp_default, "debit": subtotal, "credit": 0, "description": desc},
         {"account_code": ap_code, "debit": 0, "credit": total, "description": desc},
     ]
+    # B-10: AP dari GR dengan harga ≠ GR → GRNI hanya sebesar nilai GR, selisih ke PPV
+    ppv = round(float(invoice.get("gl_price_variance") or 0), 2)
+    if ppv != 0 and (invoice.get("source") == "gr" or invoice.get("gr_ids")):
+        ppv_code = mapping.get("debit_price_variance")
+        if not ppv_code:
+            result = {"ok": False, "error": "Harga tagihan ≠ harga GR tetapi mapping 'ap_invoice.debit_price_variance' belum diisi."}
+            await _save_source_posting_result(db, "rahaza_ap_invoices", inv_id, result)
+            return result
+        lines[0]["debit"] = round(subtotal - ppv, 2)
+        lines.append({"account_code": ppv_code, "debit": ppv if ppv > 0 else 0, "credit": -ppv if ppv < 0 else 0,
+                      "description": f"{desc} - Selisih harga beli vs GR"})
     if tax > 0 and tax_code:
         lines.append({"account_code": tax_code, "debit": tax, "credit": 0, "description": f"{desc} - PPN Masukan"})
 
@@ -1088,16 +1114,24 @@ async def post_inventory_issue(db, mi: dict, user: dict) -> dict:
         ):
             mat_cost_map[m["id"]] = float(m.get("unit_cost") or 0)
     total = 0.0
+    applied = []
     for it in items_mi:
         qty = float(it.get("qty_issued") or it.get("qty_required") or 0)
         if qty <= 0:
             continue
-        unit_cost = mat_cost_map.get(it.get("material_id"), 0.0)
+        # B-12: nilai bahan = biaya saat transaksi; disimpan `unit_cost_applied` agar posting ulang tidak
+        # memakai harga master yang sudah bergeser
+        unit_cost = float(it.get("unit_cost_applied") or 0) or mat_cost_map.get(it.get("material_id"), 0.0)
+        applied.append((it.get("material_id"), unit_cost))
         total += qty * unit_cost
     if total <= 0:
         result = {"ok": False, "error": "Total issue cost = 0 (materials tanpa unit_cost)."}
         await _save_source_posting_result(db, "rahaza_material_issues", mi_id, result)
         return result
+    if any(not it.get("unit_cost_applied") for it in items_mi if it.get("material_id")):
+        cost_by_mat = dict(applied)
+        await db.rahaza_material_issues.update_one({"id": mi_id}, {"$set": {
+            "items": [{**it, "unit_cost_applied": cost_by_mat.get(it.get("material_id"), it.get("unit_cost_applied"))} for it in items_mi]}})
 
     try:
         je_date = datetime.fromisoformat(str(mi.get("issued_at") or mi.get("created_at") or _now()).replace("Z", "+00:00")).date()
@@ -1388,6 +1422,7 @@ async def post_production_variance(db, variance: dict, user: dict) -> dict:
 
     result = await _create_posted_je(db, je_date, memo, "production_variance", source_ref, lines, user)
     await _save_source_posting_result(db, "production_variances", var_id, result, prefix="gl")
+    return result
 
 
 # ───────────────────────── ASSET ACQUISITION POSTING (Phase 8A) ───────────────
@@ -1432,6 +1467,7 @@ async def post_asset_acquisition(db, asset: dict, user: dict) -> dict:
 
     result = await _create_posted_je(db, je_date, memo, "asset_acquisition", source_ref, lines, user)
     await _save_source_posting_result(db, "rahaza_fixed_assets", asset_id, result, prefix="gl")
+    return result
 
 
 # ───────────────────────── DEPRECIATION POSTING (Phase 8B) ────────────────────

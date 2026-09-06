@@ -119,6 +119,7 @@ SEED_TEMPLATE = [
     # COGS ─────────────────────────────────────────────────────────────────
     ("5-0000", "HARGA POKOK PENJUALAN", "COGS", True, {}),
     ("5-1000", "HPP Bahan Baku", "COGS", False, {"is_cogs_material": True}),
+    ("5-1900", "Selisih Harga Pembelian (PPV)", "COGS", False, {"is_price_variance": True}),
     ("5-2000", "HPP Tenaga Kerja Langsung", "COGS", False, {"is_cogs_labor": True}),
     ("5-3000", "HPP Overhead Pabrik", "COGS", True, {}),
     ("5-3100", "Listrik Pabrik", "COGS", False, {"is_cogs_overhead": True}),
@@ -506,11 +507,11 @@ DA_COA_SEED = [
     ("6-420","Biaya Langganan Aplikasi (SaaS/Data)","EXPENSE",False,{},"6-400",None),
     ("6-430","Biaya Bonus Target Karyawan OS","EXPENSE",False,{},"6-400",None),
     # BIAYA MAKLON
-    ("7-100","Biaya Produksi Maklon","EXPENSE",True,{},"7-000",None),
-    ("7-110","Biaya Bahan Klien Maklon","EXPENSE",False,{},"7-100",None),
-    ("7-120","Biaya Vendor CMT – Maklon","EXPENSE",False,{},"7-100",None),
-    ("7-130","Biaya Pengiriman ke Klien Maklon","EXPENSE",False,{},"7-100",None),
-    ("7-140","Biaya Administrasi Maklon","EXPENSE",False,{},"7-100",None),
+    ("7-100","Biaya Produksi Maklon","COGS",True,{},"7-000",None),
+    ("7-110","Biaya Bahan Klien Maklon","COGS",False,{},"7-100",None),
+    ("7-120","Biaya Vendor CMT – Maklon","COGS",False,{},"7-100",None),
+    ("7-130","Biaya Pengiriman ke Klien Maklon","COGS",False,{},"7-100",None),
+    ("7-140","Biaya Administrasi Maklon","COGS",False,{},"7-100",None),
     # BIAYA PRODUKSI OVERHEAD
     ("8-100","Gaji & SDM Produksi","EXPENSE",True,{},"8-000",None),
     ("8-110","Gaji Karyawan Gudang","EXPENSE",False,{"is_salary_expense":True},"8-100",None),
@@ -744,7 +745,14 @@ async def seed_coa_accounts(db) -> dict:
         })
         existing_codes.add(code)
         inserted += 1
-    return {"inserted": inserted, "skipped": skipped,
+    # M-03: akun biaya maklon 7-1xx adalah HPP proyek maklon (COGS), bukan beban operasional — perbaiki DB lama
+    type_fixed = 0
+    for code, name, acc_type, *_ in DA_COA_SEED:
+        if code.startswith("7-1") and acc_type == "COGS":
+            r = await db.rahaza_coa_accounts.update_one({"code": code, "type": {"$ne": "COGS"}},
+                                                        {"$set": {"type": "COGS", "normal_balance": "DEBIT", "updated_at": _now()}})
+            type_fixed += r.modified_count
+    return {"inserted": inserted, "skipped": skipped, "type_fixed": type_fixed,
             "total_template": len(SEED_TEMPLATE) + len(DA_COA_SEED)}
 
 

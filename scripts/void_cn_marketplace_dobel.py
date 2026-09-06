@@ -37,6 +37,7 @@ async def main(apply: bool):
     voided, skipped, total_amt = 0, [], 0.0
     now = datetime.now(timezone.utc)
     for cn in cns:
+        err = None
         je = await db.rahaza_journal_entries.find_one({"id": cn["gl_je_id"]}, {"_id": 0})
         label = f"{cn.get('cn_number')} → {(je or {}).get('je_number')} Rp {round(float(cn.get('total') or 0)):,}"
         if not je:

@@ -74,6 +74,7 @@ DEFAULT_PROFILES = [
             "debit_expense_default": "6-2900",
             "debit_inventory_rm": "1-1401",
             "debit_grni": "2-1150",
+            "debit_price_variance": "5-1900",
             "debit_tax_input": "1-1501",
             "credit_ap": "2-1100",
         },

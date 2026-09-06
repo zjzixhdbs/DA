@@ -247,9 +247,9 @@ async def profit_loss(
         "OTHER_EXPENSE": {"label": "Beban Lain-lain", "accounts": []},
     }
     accounts = await db.rahaza_coa_accounts.find(
-        {"type": {"$in": list(type_groups.keys())}, "is_group": False, "active": True},
+        {"type": {"$in": list(type_groups.keys())}, "is_group": False},
         {"_id": 0},
-    ).sort("code", 1).to_list(500)
+    ).sort("code", 1).to_list(500)  # B-13: akun nonaktif bersaldo tetap ikut (sama dgn neraca)
 
     total_revenue = 0.0
     total_other_income = 0.0

@@ -719,6 +719,9 @@ async def record_ap_payment(iid: str, request: Request):
     inv = await db.rahaza_ap_invoices.find_one({"id": iid}, {"_id": 0})
     if not inv:
         raise HTTPException(404, "Invoice tidak ditemukan.")
+    if (inv.get("status") or "").lower() == "draft":
+        # B-11: pembayaran atas invoice draft dulu ikut memposting invoice diam-diam
+        raise HTTPException(400, "Invoice masih draft — approve/kirim (send) invoice terlebih dahulu sebelum mencatat pembayaran.")
     # ── R10 concurrency hardening (TOCTOU-safe): atomic conditional payment (CC3).
     updated = await db.rahaza_ap_invoices.find_one_and_update(
         {
@@ -955,8 +958,10 @@ async def create_cash_account(request: Request):
     name = (body.get("name") or "").strip()
     if not code or not name:
         raise HTTPException(400, "code & name wajib.")
-    if await db.rahaza_cash_accounts.find_one({"code": code, "active": True}):
-        raise HTTPException(409, f"Kode '{code}' sudah terpakai.")
+    dup = await db.rahaza_cash_accounts.find_one({"code": code}, {"_id": 0, "active": 1})
+    if dup:
+        raise HTTPException(409, f"Kode '{code}' sudah terpakai." + ("" if dup.get("active", True) else
+                            " Rekening dengan kode ini sudah dinonaktifkan — aktifkan kembali lewat Edit, jangan buat baru (akun GL-nya sudah ada)."))
     doc = {
         "id": _uid(), "code": code, "name": name,
         "type": body.get("type") or "cash",  # cash | bank

@@ -109,7 +109,8 @@ COA = {
     "discount":    "4-1300",  # Diskon Penjualan (kontra-pendapatan)
     "platform_fee": "4-141",  # Potongan Platform (Fee Shopee/TikTok)
     "ads":         "6-1100",  # Biaya Iklan & Promosi
-    "other":       "7-4000",  # Pendapatan/Beban Lain-Lain
+    "other":       "7-4000",  # Pendapatan Lain-Lain (subsidi ongkir, penyesuaian positif)
+    "other_expense": "6-2900",  # M-05: Beban Umum & Lain-lain (potongan lain, penyesuaian negatif)
 }
 
 # Field uang + arahnya terhadap `net_payout`. Satu daftar ini dipakai oleh
@@ -189,12 +190,21 @@ async def _resolve_coa(db, account: dict) -> dict:
             missing.append(f"{label} (`{field}`)")
             continue
         acc = await db.rahaza_coa_accounts.find_one(
-            {"code": code}, {"_id": 0, "code": 1, "name": 1, "is_group": 1, "active": 1})
+            {"code": code}, {"_id": 0, "code": 1, "name": 1, "is_group": 1, "active": 1, "flags": 1})
+        # Akun toko lama masih menunjuk kode legacy 3-digit (mis. 1-131) yang sudah dinonaktifkan
+        # → ikuti `flags.legacy_of` ke akun kanonik (1-1201), jangan menolak pencairan.
+        legacy_of = ((acc or {}).get("flags") or {}).get("legacy_of")
+        if acc and not acc.get("active", True) and legacy_of:
+            canon = await db.rahaza_coa_accounts.find_one(
+                {"code": legacy_of}, {"_id": 0, "code": 1, "name": 1, "is_group": 1, "active": 1})
+            if canon and canon.get("active", True) and not canon.get("is_group"):
+                acc, code = canon, legacy_of
+                sources[role] = f"account(legacy→{legacy_of})"
         if not acc or acc.get("is_group") or not acc.get("active", True):
             missing.append(f"{label} (`{field}` = {code} tidak ada/tidak aktif/akun induk)")
             continue
         eff[role] = code
-        sources[role] = "account"
+        sources[role] = sources.get(role) if sources.get(role, "global") != "global" else "account"
     if missing:
         raise HTTPException(
             400,
@@ -674,12 +684,13 @@ async def create_draft_journal(sid: str, request: Request):
          "description": "Komisi + fee layanan + komisi afiliasi"},
         {"account_code": ACC["ads"], "debit": g("ads_deduction"), "credit": 0,
          "description": "Biaya iklan dipotong dari pencairan"},
-        {"account_code": ACC["other"], "debit": g("other_deductions"), "credit": 0,
+        {"account_code": ACC["other_expense"], "debit": g("other_deductions"), "credit": 0,
          "description": (doc.get("other_deductions_note") or "Potongan lain")},
-        # Penyesuaian bisa dua arah — ditulis di sisi yang benar, bukan dipaksa.
-        {"account_code": ACC["other"],
-         "debit": (-adj if adj < 0 else 0), "credit": (adj if adj > 0 else 0),
-         "description": "Penyesuaian platform"},
+        # Penyesuaian bisa dua arah — positif = pendapatan lain, negatif = beban lain (M-05).
+        {"account_code": ACC["other"], "debit": 0, "credit": (adj if adj > 0 else 0),
+         "description": "Penyesuaian platform (+)"},
+        {"account_code": ACC["other_expense"], "debit": (-adj if adj < 0 else 0), "credit": 0,
+         "description": "Penyesuaian platform (−)"},
     ]
 
     res = await _create_posted_je(

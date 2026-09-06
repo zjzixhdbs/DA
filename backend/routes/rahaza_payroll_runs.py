@@ -308,7 +308,12 @@ async def pay_payroll_run(run_id: str, request: Request):
             "Gunakan void-payment untuk membatalkan.")
 
     payment_date   = (body.get("payment_date") or str(date.today()))[:10]
-    bank_code      = (body.get("bank_account_code") or "1-1201").strip()
+    # L-03: default bank dari profil posting payroll_payment (bukan hard-code)
+    from routes.rahaza_posting_profiles import get_mapping as _get_mapping
+    _pp_map = await _get_mapping(db, "payroll_payment")
+    bank_code      = (body.get("bank_account_code") or _pp_map.get("credit_bank_default") or "").strip()
+    if not bank_code:
+        raise HTTPException(400, "bank_account_code wajib — profil posting 'payroll_payment.credit_bank_default' belum diisi.")
     payment_method = body.get("payment_method") or "bank_transfer"
     notes          = (body.get("notes") or "").strip()
 
